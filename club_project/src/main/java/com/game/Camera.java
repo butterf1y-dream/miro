@@ -1,52 +1,96 @@
 package com.game;
 
 public class Camera {
-    public double x, y;   // position (tile coords)
-    public double rot;    // yaw
 
-    // movement tuning
-    private final double MOVE_SPEED = 0.085;
-    private final double STRAFE_SPEED = 0.065;
+    public double x, y;
+    public double rot;
 
-    public Camera(double sx, double sy, double srot) {
-        this.x = sx;
-        this.y = sy;
-        this.rot = srot;
+    // movement
+    private static final double WALK_SPEED = 0.045;
+    private static final double SPRINT_SPEED = 0.085;
+
+    // stamina
+    public double stamina = 100.0;
+    public static final double MAX_STAMINA = 100.0;
+    private static final double STAMINA_DRAIN = 0.9;
+    private static final double STAMINA_RECOVER = 0.6;
+
+    public boolean escaped = false;
+
+    // head bob
+    private double bobPhase = 0.0;
+    public double bobOffset = 0.0;
+
+    public Camera(double x, double y, double rot) {
+        this.x = x;
+        this.y = y;
+        this.rot = rot;
     }
 
-    public void rotate(double d) {
-        rot += d;
+    public void rotate(double amt) {
+        rot += amt;
     }
 
     public void update(Input in, int[][] map) {
-        double dx = 0, dy = 0;
-        double fwdX = Math.cos(rot), fwdY = Math.sin(rot);
-        double rightX = Math.cos(rot + Math.PI / 2.0), rightY = Math.sin(rot + Math.PI / 2.0);
 
-        if (in.forward) { dx += fwdX * MOVE_SPEED; dy += fwdY * MOVE_SPEED; }
-        if (in.back)    { dx -= fwdX * MOVE_SPEED; dy -= fwdY * MOVE_SPEED; }
-        if (in.left)    { dx -= rightX * STRAFE_SPEED; dy -= rightY * STRAFE_SPEED; }
-        if (in.right)   { dx += rightX * STRAFE_SPEED; dy += rightY * STRAFE_SPEED; }
+        boolean moving = in.forward || in.backward || in.left || in.right;
+        boolean canSprint = in.sprint && stamina > 0 && moving;
 
-        attemptMove(dx, dy, map);
-    }
+        double speed = canSprint ? SPRINT_SPEED : WALK_SPEED;
 
-    private void attemptMove(double dx, double dy, int[][] map) {
-        if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return;
-        double nx = x + dx;
-        double ny = y + dy;
+        // stamina logic
+        if (canSprint) {
+            stamina -= STAMINA_DRAIN;
+            if (stamina < 0) stamina = 0;
+        } else {
+            stamina += STAMINA_RECOVER;
+            if (stamina > MAX_STAMINA) stamina = MAX_STAMINA;
+        }
 
-        int wx = (int)Math.floor(nx);
-        int wy = (int)Math.floor(y);
-        if (isWalkable(wx, wy, map)) x = nx;
+        // head bob
+        if (canSprint) {
+            bobPhase += 0.22;
+            bobOffset = Math.sin(bobPhase) * 6.0;
+        } else if (moving) {
+            bobPhase += 0.12;
+            bobOffset = Math.sin(bobPhase) * 3.0;
+        } else {
+            bobOffset *= 0.8;
+        }
 
-        wx = (int)Math.floor(x);
-        wy = (int)Math.floor(ny);
-        if (isWalkable(wx, wy, map)) y = ny;
-    }
+        double dx = Math.cos(rot);
+        double dy = Math.sin(rot);
 
-    private boolean isWalkable(int gx, int gy, int[][] map) {
-        if (gy < 0 || gx < 0 || gy >= map.length || gx >= map[0].length) return false;
-        return map[gy][gx] == 0 || map[gy][gx] == 2; // 0 empty, 2 exit allowed
+        double nx = x;
+        double ny = y;
+
+        if (in.forward) {
+            nx += dx * speed;
+            ny += dy * speed;
+        }
+        if (in.backward) {
+            nx -= dx * speed;
+            ny -= dy * speed;
+        }
+        if (in.left) {
+            nx += dy * speed;
+            ny -= dx * speed;
+        }
+        if (in.right) {
+            nx -= dy * speed;
+            ny += dx * speed;
+        }
+
+        // collision (벽 = 1, 탈출구 = 2 는 통과 가능)
+        if (map[(int) y][(int) nx] != 1) x = nx;
+        if (map[(int) ny][(int) x] != 1) y = ny;
+
+        // ===== 탈출 판정 =====
+        int tx = (int) x;
+        int ty = (int) y;
+
+        if (map[ty][tx] == 2) {
+            escaped = true;
+        }
     }
 }

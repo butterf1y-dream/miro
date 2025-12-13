@@ -4,69 +4,60 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferStrategy;
-import java.awt.image.BufferedImage;
+import java.util.List;
 
 public class Game extends Canvas implements Runnable {
-    public static final int WIDTH = 1024;
+
+    public static final int WIDTH = 1200;
     public static final int HEIGHT = 720;
 
+    private boolean running = true;
     private Thread thread;
-    private boolean running = false;
 
-    private BufferedImage screenImage;
     private Screen screen;
     private Camera camera;
     private Input input;
 
-    // map will be generated
     private int[][] MAP;
-    private final int MAP_W = 41; // odd recommended
-    private final int MAP_H = 41;
+    private List<Point> escapePath;
+    private boolean showPath = true;
 
-    // mouse drag state
     private boolean dragging = false;
     private int lastMouseX;
 
     public Game() {
         setPreferredSize(new Dimension(WIDTH, HEIGHT));
-        screenImage = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
 
-        // generate maze
-        MAP = MazeGenerator.generate(MAP_W, MAP_H);
+        MAP = MazeGenerator.generate(41, 41);
+        escapePath = MazeGenerator.getEscapePath();
 
-        // place an EXIT tile (value 2) at far corner
-        MAP[MAP_H - 2][MAP_W - 2] = 2;
-
-        // create camera at entrance (1,1)
-        camera = new Camera(1.5, 1.5, 0.0);
-
+        camera = new Camera(1.5, 1.5, 0);
         screen = new Screen(WIDTH, HEIGHT, MAP);
         input = new Input();
 
         addKeyListener(input);
+
         addMouseListener(new MouseAdapter() {
-            @Override
             public void mousePressed(MouseEvent e) {
                 dragging = true;
                 lastMouseX = e.getX();
             }
-            @Override
             public void mouseReleased(MouseEvent e) {
                 dragging = false;
             }
         });
+
         addMouseMotionListener(new MouseMotionAdapter() {
-            @Override
             public void mouseDragged(MouseEvent e) {
                 if (dragging) {
                     int dx = e.getX() - lastMouseX;
                     lastMouseX = e.getX();
-                    camera.rotate(dx * 0.0035); // sensitivity
+                    camera.rotate(dx * 0.003);
                 }
             }
         });
 
-        JFrame frame = new JFrame("Escape Maze — Dark Vision Minimap");
+        JFrame frame = new JFrame("미로");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.add(this);
         frame.pack();
@@ -79,110 +70,126 @@ public class Game extends Canvas implements Runnable {
     }
 
     public synchronized void start() {
-        running = true;
-        thread = new Thread(this, "GameThread");
+        thread = new Thread(this);
         thread.start();
-    }
-
-    public synchronized void stop() {
-        running = false;
-        try { thread.join(); } catch (InterruptedException ignored) {}
     }
 
     @Override
     public void run() {
-        final double ns = 1000000000.0 / 60.0;
+        final double ns = 1_000_000_000.0 / 60.0;
         long last = System.nanoTime();
         double delta = 0;
+
         while (running) {
             long now = System.nanoTime();
             delta += (now - last) / ns;
             last = now;
+
             while (delta >= 1) {
                 camera.update(input, MAP);
+
+                if (input.togglePath) {
+                    showPath = !showPath;
+                    input.togglePath = false;
+                }
+
+                if (camera.escaped) {
+                    JOptionPane.showMessageDialog(null, "탈출!");
+                    System.exit(0);
+                }
+
                 delta--;
             }
+
             screen.render(camera);
+
             BufferStrategy bs = getBufferStrategy();
-            if (bs == null) { createBufferStrategy(3); continue; }
+            if (bs == null) {
+                createBufferStrategy(3);
+                continue;
+            }
+
             Graphics g = bs.getDrawGraphics();
 
-            // draw world
+            // ===== 월드 =====
             g.drawImage(screen.getImage(), 0, 0, null);
 
-            // draw HUD / minimap (top-right)
+            // ===== 미니맵 =====
             drawMiniMap(g);
 
-            // crosshair
-            drawCrosshair(g);
+            // ===== 스태미나 바 =====
+            drawStamina(g);
 
             g.dispose();
             bs.show();
 
-            try { Thread.sleep(2); } catch (InterruptedException ignored) {}
+            Toolkit.getDefaultToolkit().sync();
         }
-    }
-
-    private void drawCrosshair(Graphics g) {
-        int cx = WIDTH / 2;
-        int cy = HEIGHT / 2;
-        g.setColor(Color.WHITE);
-        g.drawLine(cx - 8, cy, cx - 3, cy);
-        g.drawLine(cx + 3, cy, cx + 8, cy);
-        g.drawLine(cx, cy - 8, cx, cy - 3);
-        g.drawLine(cx, cy + 3, cx, cy + 8);
     }
 
     private void drawMiniMap(Graphics g) {
-        int mapW = MAP[0].length;
-        int mapH = MAP.length;
-        int miniSize = 180; // square minimap size
-        int px = WIDTH - miniSize - 12; // top-right margin
-        int py = 12;
-        int cell = Math.max(2, miniSize / mapW);
+        int size = 180;
+        int cell = size / MAP.length;
+        int ox = WIDTH - size - 12;
+        int oy = 12;
 
-        // dark background
-        g.setColor(new Color(0, 0, 0, 200));
-        g.fillRoundRect(px - 6, py - 6, miniSize + 12, miniSize + 12, 10, 10);
+        g.setColor(new Color(0,0,0,150));
+        g.fillRoundRect(ox-6, oy-6, size+12, size+12, 10,10);
 
-        // vision radius in tiles
-        int vision = 6;
-
-        // draw tiles, but only brighten tiles within vision radius
-        for (int my = 0; my < mapH; my++) {
-            for (int mx = 0; mx < mapW; mx++) {
-                int dx = mx - (int) camera.x;
-                int dy = my - (int) camera.y;
-                double d = Math.sqrt(dx * dx + dy * dy);
-                int sx = px + mx * cell;
-                int sy = py + my * cell;
-
-                if (d <= vision) {
-                    // visible — color by tile
-                    if (MAP[my][mx] == 1) g.setColor(new Color(120,120,120)); // wall
-                    else if (MAP[my][mx] == 2) g.setColor(new Color(255, 200, 30)); // exit
-                    else g.setColor(new Color(200,200,200)); // path
-                } else {
-                    // dark / hidden
-                    g.setColor(new Color(30, 30, 30));
-                }
-                g.fillRect(sx, sy, cell, cell);
+        for (int y=0;y<MAP.length;y++) {
+            for (int x=0;x<MAP[0].length;x++) {
+                if (MAP[y][x]==1) g.setColor(Color.darkGray);
+                else if (MAP[y][x]==2) g.setColor(Color.green);
+                else g.setColor(Color.LIGHT_GRAY);
+                g.fillRect(ox+x*cell, oy+y*cell, cell, cell);
             }
         }
 
-        // draw player as triangle showing facing direction
-        int centerX = px + (int) (camera.x * cell);
-        int centerY = py + (int) (camera.y * cell);
-        int dirX = (int) (Math.cos(camera.rot) * (cell * 1.2));
-        int dirY = (int) (Math.sin(camera.rot) * (cell * 1.2));
-        g.setColor(Color.RED);
-        int[] xs = { centerX + dirX, centerX - dirY / 2, centerX + dirY / 2 };
-        int[] ys = { centerY + dirY, centerY + dirX / 2, centerY - dirX / 2 };
-        g.fillPolygon(xs, ys, 3);
+        if (showPath && escapePath != null) {
+            g.setColor(Color.RED);
+            for (int i=0;i<escapePath.size()-1;i++) {
+                Point a = escapePath.get(i);
+                Point b = escapePath.get(i+1);
+                g.drawLine(
+                        ox + a.x*cell + cell/2,
+                        oy + a.y*cell + cell/2,
+                        ox + b.x*cell + cell/2,
+                        oy + b.y*cell + cell/2
+                );
+            }
+        }
 
-        // border
+        g.setColor(Color.RED);
+        g.fillOval(
+                ox + (int)(camera.x*cell)-3,
+                oy + (int)(camera.y*cell)-3,
+                6,6
+        );
+    }
+
+    // ===== 스태미나 바 =====
+    private void drawStamina(Graphics g) {
+        int barW = 220;
+        int barH = 12;
+
+        int x = WIDTH / 2 - barW / 2;
+        int y = HEIGHT - 28;
+
+        double ratio = camera.stamina / Camera.MAX_STAMINA;
+
+        g.setColor(new Color(0, 0, 0, 150));
+        g.fillRoundRect(x - 4, y - 4, barW + 8, barH + 8, 8, 8);
+
         g.setColor(Color.DARK_GRAY);
-        g.drawRoundRect(px - 6, py - 6, miniSize + 12, miniSize + 12, 10, 10);
+        g.fillRect(x, y, barW, barH);
+
+        g.setColor(ratio > 0.3
+                ? new Color(90, 220, 90)
+                : new Color(220, 80, 80));
+        g.fillRect(x, y, (int) (barW * ratio), barH);//응으으으으으으으으응아니야
+
+        g.setColor(Color.BLACK);
+        g.drawRect(x, y, barW, barH);
     }
 
     public static void main(String[] args) {
