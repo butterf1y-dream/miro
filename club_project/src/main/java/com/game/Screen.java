@@ -1,27 +1,27 @@
+// Screen.java (전체 수정본 - 아이템 투영/깊이 계산 완전 수정 + Z-Buffer 정확화)
 package com.game;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
+import java.util.List;
 
 public class Screen {
 
     private int width, height;
     private int[][] map;
+    private List<Item> items;
 
     private BufferedImage img;
     private int[] pixels;
 
-    // 시야각 (지금 값 유지)
     private static final double FOV = 0.35;
+    private static final double MAX_DIST = 20.0;
 
-    // 공포 연출 파라미터
-    private static final double MAX_VIEW_DIST = 20.0;
-    private static final double DARKNESS_STRENGTH = 1.15;
-
-    public Screen(int w, int h, int[][] map) {
+    public Screen(int w, int h, int[][] map, List<Item> items) {
         this.width = w;
         this.height = h;
         this.map = map;
+        this.items = items;
 
         img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         pixels = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
@@ -32,103 +32,144 @@ public class Screen {
     }
 
     public void render(Camera cam) {
+        // Z-Buffer 초기화 (벽 유클리드 거리)
+        float[] zBuffer = new float[width];
+        for (int i = 0; i < width; i++) {
+            zBuffer[i] = Float.MAX_VALUE;
+        }
 
-        // --- 배경 (어두운 하늘 / 바닥) ---
-        int skyColor = 0x0A0E1A;    // 매우 어두운 남색
-        int floorColor = 0x080808;  // 거의 검정
-
+        // 배경 클리어
         for (int y = 0; y < height; y++) {
-            int col = (y < height / 2) ? skyColor : floorColor;
-            for (int x = 0; x < width; x++) {
-                pixels[x + y * width] = col;
-            }
+            int c = (y < height / 2) ? 0x0A0E1A : 0x050505;
+            for (int x = 0; x < width; x++) pixels[x + y * width] = c;
         }
 
         double cos = Math.cos(cam.rot);
         double sin = Math.sin(cam.rot);
 
-        // --- 레이캐스팅 ---
+        // 벽 raycasting + Z-Buffer (유클리드 거리 저장)
         for (int x = 0; x < width; x++) {
+            double cx = 2.0 * x / width - 1.0;
+            double rayX = cos + cx * -sin * FOV;
+            double rayY = sin + cx * cos * FOV;
 
-            double cameraX = 2.0 * x / width - 1.0;
-
-            double rayX = cos + cameraX * (-sin) * FOV;
-            double rayY = sin + cameraX * ( cos) * FOV;
-
-            double len = Math.sqrt(rayX * rayX + rayY * rayY);
-            rayX /= len;
-            rayY /= len;
-
-            double dist = 0;
+            double dist = 0.0;
             int hit = 0;
+            double hitX = 0, hitY = 0;
 
-            while (dist < MAX_VIEW_DIST) {
-                dist += 0.05;
-
+            while (dist < MAX_DIST) {
+                dist += 0.04;  // 스텝 약간 줄여 정확도 ↑
                 int mx = (int) (cam.x + rayX * dist);
                 int my = (int) (cam.y + rayY * dist);
-
-                if (mx < 0 || my < 0 || mx >= map[0].length || my >= map.length)
-                    break;
-
+                if (mx < 0 || my < 0 || mx >= map[0].length || my >= map.length) break;
                 hit = map[my][mx];
+                hitX = mx + 0.5;  // 셀 중앙
+                hitY = my + 0.5;
                 if (hit != 0) break;
             }
 
-            // fisheye 보정
-            dist *= Math.cos(cameraX * 0.6);
+            // Z-Buffer: 벽까지의 실제 유클리드 거리
+            double wallDist = Math.hypot(cam.x - hitX, cam.y - hitY);
+            zBuffer[x] = (float) Math.min(dist, wallDist);
 
-            int lineHeight = (int) (height / (dist + 0.0001));
-            int drawStart = height / 2 - lineHeight / 2;
-            int drawEnd = height / 2 + lineHeight / 2;
+            int h = (int) (height / dist);
+            int y1 = Math.max(0, height / 2 - h / 2);
+            int y2 = Math.min(height, height / 2 + h / 2);
 
-            if (drawStart < 0) drawStart = 0;
-            if (drawEnd >= height) drawEnd = height - 1;
+            int base = (hit == 2) ? 0x00FF00 : 0x888888;
+            double fog = Math.max(0, Math.min(1, dist / MAX_DIST - cam.lightBoost));
 
-            // 벽 기본 색
-            int baseColor = (hit == 2) ? 0x1FFF1F : 0x888888;
+            int r = (int) (((base >> 16) & 255) * (1 - fog));
+            int g = (int) (((base >> 8) & 255) * (1 - fog));
+            int b = (int) ((base & 255) * (1 - fog));
+            int col = (r << 16) | (g << 8) | b;
 
-            // --- 거리 기반 어둠 (Fog) ---
-            double darkness = Math.min(1.0, dist / MAX_VIEW_DIST);
-            darkness = Math.pow(darkness, DARKNESS_STRENGTH);
-
-            int r = (int)(((baseColor >> 16) & 0xFF) * (1.0 - darkness));
-            int g = (int)(((baseColor >> 8) & 0xFF) * (1.0 - darkness));
-            int b = (int)((baseColor & 0xFF) * (1.0 - darkness));
-
-            int shaded = (r << 16) | (g << 8) | b;
-
-            for (int y = drawStart; y < drawEnd; y++) {
-                pixels[x + y * width] = shaded;
+            for (int y = y1; y < y2; y++) {
+                pixels[x + y * width] = col;
             }
         }
 
-        // --- 비네트 (화면 가장자리 어둡게) ---
-        applyVignette();
+        // 아이템 렌더링 (Z-Buffer 후)
+        renderItems(cam, zBuffer, cos, sin);
     }
 
-    // 공포게임 핵심 요소
-    private void applyVignette() {
-        int cx = width / 2;
-        int cy = height / 2;
-        double maxDist = Math.sqrt(cx * cx + cy * cy);
+    private void renderItems(Camera cam, float[] zBuffer, double cos, double sin) {
+        for (Item it : items) {
+            if (it.collected) continue;
+            it.update();
 
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int dx = x - cx;
-                int dy = y - cy;
-                double d = Math.sqrt(dx * dx + dy * dy) / maxDist;
+            double dx = it.x - cam.x;
+            double dy = it.y - cam.y;
 
-                double v = Math.min(1.0, d * 1.25);
+            // 수직 거리 (투영 깊이: forward dot)
+            double perpDist = dx * cos + dy * sin;
+            if (perpDist < 0.05) continue;  // 카메라 뒤/너무 가까움
 
-                int idx = x + y * width;
-                int col = pixels[idx];
+            // 실제 유클리드 거리 (Z 비교용)
+            double itemDist = Math.hypot(dx, dy);
 
-                int r = (int)(((col >> 16) & 0xFF) * (1.0 - v));
-                int g = (int)(((col >> 8) & 0xFF) * (1.0 - v));
-                int b = (int)((col & 0xFF) * (1.0 - v));
+            // 화면 X 투영 (right vector dot)
+            double projX = (-dx * sin + dy * cos) / perpDist;
+            int sx = (int) (projX * (width / 2.0) + width / 2.0);
 
-                pixels[idx] = (r << 16) | (g << 8) | b;
+            // 크기 (perpDist 기준)
+            int size = (int) (300.0 / perpDist);  // 크기 ↑ (200 → 300)
+            if (size < 6) continue;
+
+            int half = size / 2;
+            if (sx + half < 0 || sx - half >= width) continue;
+
+            int sy = height / 2 - half + (int) (Math.sin(it.bob) * 12);  // bob ↑
+            if (sy + half < 0 || sy - half >= height) continue;
+
+            int color = switch (it.type) {
+                case STAMINA -> 0x66FF66;
+                case LIGHT -> 0xFFFF66;
+                case MAP -> 0x66AAFF;
+            };
+
+            // 스프라이트 픽셀 (원형 + Z-Buffer 체크)
+            for (int iy = -half; iy < half; iy++) {
+                for (int ix = -half; ix < half; ix++) {
+                    if (ix * ix + iy * iy > half * half * 0.8) continue;  // 약간 납작 원
+
+                    int px = sx + ix;
+                    int py = sy + iy;
+                    if (px >= 0 && px < width && py >= 0 && py < height) {
+                        // Z-Buffer: 아이템이 벽보다 가까우면 그리기
+                        if (itemDist < zBuffer[px]) {
+                            pixels[px + py * width] = color;
+                        }
+                    }
+                }
+            }
+
+            // 밝은 테두리 (Z 체크)
+            int borderColor = 0xFFFFFF;
+            for (int i = 0; i < half; i += 2) {
+                int[] offsets = {i, -i};
+                for (int off : offsets) {
+                    int pxTop = sx + off;
+                    int pyLeft = sy + off;
+                    int pyRight = sy - off;  // bottom은 sy + i지만 상/하
+
+                    // 상하
+                    if (pxTop >= 0 && pxTop < width && sy >= 0 && sy < height && itemDist < zBuffer[pxTop]) {
+                        pixels[pxTop + sy * width] = borderColor;
+                    }
+                    int pxBot = sx + off;
+                    if (pxBot >= 0 && pxBot < width && sy + half - 1 >= 0 && sy + half - 1 < height && itemDist < zBuffer[pxBot]) {
+                        pixels[pxBot + (sy + half - 1) * width] = borderColor;
+                    }
+
+                    // 좌우
+                    if (sx >= 0 && sx < width && pyLeft >= 0 && pyLeft < height && itemDist < zBuffer[sx]) {
+                        pixels[sx + pyLeft * width] = borderColor;
+                    }
+                    if (sx >= 0 && sx < width && pyRight >= 0 && pyRight < height && itemDist < zBuffer[sx]) {
+                        pixels[sx + pyRight * width] = borderColor;
+                    }
+                }
             }
         }
     }
