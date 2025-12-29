@@ -1,4 +1,3 @@
-// Screen.java (전체 수정본 - private monster 접근 에러 완전 해결)
 package com.game;
 
 import java.awt.image.BufferedImage;
@@ -86,10 +85,10 @@ public class Screen {
         // 아이템 렌더링
         renderItems(cam, zBuffer, cos, sin);
 
-        // 몬스터 렌더링 (getter 사용)
+        // 몬스터 렌더링
         renderMonster(cam, zBuffer, cos, sin);
 
-        // 손전등 vignette 효과 (마지막 적용)
+        // 손전등 vignette 효과 (마지막에 적용)
         applyFlashlightVignette(cam);
     }
 
@@ -124,7 +123,7 @@ public class Screen {
                 case FLASHLIGHT -> 0x66AAFF;
             };
 
-            // 본체
+            // 아이템 본체 (원형)
             for (int iy = -half; iy < half; iy++) {
                 for (int ix = -half; ix < half; ix++) {
                     if (ix * ix + iy * iy > half * half * 0.8) continue;
@@ -159,8 +158,8 @@ public class Screen {
     }
 
     private void renderMonster(Camera cam, float[] zBuffer, double cos, double sin) {
-        Monster mon = cam.getMonster();  // getter 사용으로 private 접근 해결
-        if (mon == null) return;
+        Monster mon = cam.getMonster();
+        if (mon == null || !mon.spawned) return;  // 스폰 전에는 안 보dla
 
         double dx = mon.x - cam.x;
         double dy = mon.y - cam.y;

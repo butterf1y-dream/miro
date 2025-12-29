@@ -1,4 +1,3 @@
-// MazeGenerator.java (몬스터 1마리만 생성하도록 수정)
 package com.game;
 
 import java.awt.Point;
@@ -8,7 +7,7 @@ public class MazeGenerator {
 
     private static List<Point> escapePath;
     private static List<Item> items;
-    private static Monster monster;  // 1마리만
+    private static Monster monster;
 
     public static int[][] generate(int w, int h) {
         int[][] m = new int[h][w];
@@ -21,7 +20,6 @@ public class MazeGenerator {
 
         escapePath = findPath(m,1,1,w-2,h-2);
 
-        // ===== 아이템 =====
         items = new ArrayList<>();
         Random r = new Random();
 
@@ -36,23 +34,16 @@ public class MazeGenerator {
             items.add(new Item(x+0.5, y+0.5, type));
         }
 
-        // ===== 몬스터 1마리 =====
-        int mx, my;
-        do {
-            mx = r.nextInt(w);
-            my = r.nextInt(h);
-        } while (m[my][mx] != 0 || (mx == 1 && my == 1));  // 시작점 피함
-
-        monster = new Monster(mx + 0.5, my + 0.5);
+        // 몬스터를 플레이어 정확한 시작 위치에 생성 (1.5, 1.5)
+        monster = new Monster(1.5, 1.5);
 
         return m;
     }
 
     public static List<Point> getEscapePath(){ return escapePath; }
     public static List<Item> getItems(){ return items; }
-    public static Monster getMonster() { return monster; }  // 1마리 getter
+    public static Monster getMonster() { return monster; }
 
-    // carve, findPath, shuffle 메서드는 기존 그대로
     private static void carve(int x,int y,int[][] m){
         int[] d={0,1,2,3};
         shuffle(d);

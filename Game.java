@@ -1,4 +1,3 @@
-// Game.java (전체 수정본 - revealMap 완전 제거 + enum switch 에러 해결)
 package com.game;
 
 import javax.swing.*;
@@ -15,7 +14,6 @@ public class Game extends JFrame implements Runnable {
     public static final int WIDTH = 1200;
     public static final int HEIGHT = 720;
 
-    // 정적 기록 저장소 (MainMenu와 공유)
     public static final ArrayList<Double> RECORDS = new ArrayList<>();
     private static final int MAX_RECORDS = 5;
 
@@ -31,14 +29,14 @@ public class Game extends JFrame implements Runnable {
     private List<Point> escapePath;
     private List<Item> items;
 
-    // 타이머
     private long startTime;
     private double elapsedTime;
 
-    // Shift Lock & Cursor
     private boolean shiftLock = false;
     private Robot robot;
     private Cursor blankCursor;
+
+    private boolean showPath = false;  // 플레이어에게만 경로 표시 토글
 
     public Game() {
         setTitle("미로 탈출");
@@ -57,7 +55,6 @@ public class Game extends JFrame implements Runnable {
 
         canvas.createBufferStrategy(3);
 
-        // Blank Cursor
         BufferedImage cursorImg = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
         blankCursor = Toolkit.getDefaultToolkit().createCustomCursor(cursorImg, new Point(0, 0), "blank");
 
@@ -84,15 +81,12 @@ public class Game extends JFrame implements Runnable {
 
         canvas.requestFocusInWindow();
 
-        // 게임 초기화
-        // Game.java (몬스터 1마리 초기화 부분 수정)
-        // 게임 초기화 부분 (기존 코드 중 해당 부분만 교체)
         MAP = MazeGenerator.generate(41, 41);
         escapePath = MazeGenerator.getEscapePath();
         items = MazeGenerator.getItems();
-        Monster monster = MazeGenerator.getMonster();  // 1마리만
 
         camera = new Camera(1.5, 1.5, 0);
+        Monster monster = MazeGenerator.getMonster();
         camera.setMonster(monster);
 
         screen = new Screen(WIDTH, HEIGHT, MAP, items);
@@ -137,9 +131,10 @@ public class Game extends JFrame implements Runnable {
             while (delta >= 1) {
                 elapsedTime = (System.nanoTime() - startTime) / 1_000_000_000.0;
 
-                double dt = 1.0 / 60.0;  // 60FPS 고정 dt
+                double dt = 1.0 / 60.0;
 
-                camera.update(input, MAP, dt);
+                // 몬스터는 항상 escapePath를 따라감, showPath는 플레이어 시야만
+                camera.update(input, MAP, dt, escapePath, showPath);
                 camera.collectItems(items);
 
                 if (input.toggleShiftLock) {
@@ -153,14 +148,16 @@ public class Game extends JFrame implements Runnable {
                     }
                 }
 
+                if (input.togglePath) {
+                    showPath = !showPath;
+                    input.togglePath = false;
+                }
+
                 if (camera.escaped) {
                     double time = elapsedTime;
-
                     RECORDS.add(time);
                     RECORDS.sort(Double::compareTo);
-                    if (RECORDS.size() > MAX_RECORDS) {
-                        RECORDS.remove(MAX_RECORDS);
-                    }
+                    if (RECORDS.size() > MAX_RECORDS) RECORDS.remove(MAX_RECORDS);
 
                     DecimalFormat df = new DecimalFormat("0.00");
                     JOptionPane.showMessageDialog(this,
@@ -168,6 +165,7 @@ public class Game extends JFrame implements Runnable {
                             "축하합니다!",
                             JOptionPane.INFORMATION_MESSAGE);
 
+                    running = false;
                 } else if (camera.gameOver) {
                     JOptionPane.showMessageDialog(this,
                             "몬스터에게 잡혔습니다!\n게임 오버",
@@ -206,7 +204,7 @@ public class Game extends JFrame implements Runnable {
         g.setColor(Color.WHITE);
         g.setFont(new Font("SansSerif", Font.BOLD, 20));
         DecimalFormat df = new DecimalFormat("0.00");
-        g.drawString("시간: " + df.format(elapsedTime) + "초", WIDTH - 200, 30);
+        g.drawString("시간: " + df.format(elapsedTime) + "초", WIDTH - 200, HEIGHT - 30);
 
         g.setFont(new Font("SansSerif", Font.BOLD, 18));
         g.drawString(shiftLock ? "Shift Lock: ON (L 토글)" : "Shift Lock: OFF (L 토글)", 12, 30);
@@ -251,7 +249,27 @@ public class Game extends JFrame implements Runnable {
             g.fillOval(ox + ix - 3, oy + iy - 3, 6, 6);
         }
 
-        // revealMap 관련 경로 표시 코드 완전 삭제 (더 이상 필요 없음)
+        Monster mon = camera.getMonster();
+        if (mon != null && mon.spawned) {
+            int mx = (int)(mon.x * cell);
+            int my = (int)(mon.y * cell);
+            g.setColor(Color.RED);
+            g.drawLine(ox + mx - 5, oy + my - 5, ox + mx + 5, oy + my + 5);
+            g.drawLine(ox + mx + 5, oy + my - 5, ox + mx - 5, oy + my + 5);
+            g.setColor(Color.WHITE);
+            g.drawOval(ox + mx - 6, oy + my - 6, 12, 12);
+        }
+
+        // 플레이어에게만 showPath일 때 경로 표시
+        if (showPath && escapePath != null) {
+            g.setColor(new Color(255, 0, 0, 180));
+            for (int i = 0; i < escapePath.size() - 1; i++) {
+                Point a = escapePath.get(i);
+                Point b = escapePath.get(i + 1);
+                g.drawLine(ox + a.x * cell + cell/2, oy + a.y * cell + cell/2,
+                        ox + b.x * cell + cell/2, oy + b.y * cell + cell/2);
+            }
+        }
 
         g.setColor(Color.RED);
         g.fillOval(ox + (int)(camera.x * cell) - 4, oy + (int)(camera.y * cell) - 4, 8, 8);

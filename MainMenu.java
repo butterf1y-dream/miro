@@ -1,4 +1,3 @@
-// MainMenu.java (새로 생성 - 메인 메뉴 완전 구현)
 package com.game;
 
 import javax.swing.*;
@@ -14,7 +13,7 @@ public class MainMenu extends JFrame {
     private JPanel container;
     private JPanel mainPanel, howtoPanel, recordsPanel;
 
-    public MainMenu() {
+    public MainMenu() { //메인 화면
         setTitle("미로 탈출");
         setSize(1200, 720);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -83,6 +82,19 @@ public class MainMenu extends JFrame {
         howtoPanel.add(title, BorderLayout.NORTH);
 
         // 설명 텍스트
+        JPanel textPanel = getJPanel();
+
+        howtoPanel.add(textPanel, BorderLayout.CENTER);
+
+        // 뒤로 버튼
+        JButton backBtn = createButton("메인 메뉴로", e -> cardLayout.show(container, "main"));
+        JPanel backPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        backPanel.setBackground(new Color(20, 20, 40));
+        backPanel.add(backBtn);
+        howtoPanel.add(backPanel, BorderLayout.SOUTH);
+    }
+
+    private static JPanel getJPanel() { //게임 방법설정 글써둔거
         String[] lines = {
                 "WASD: 이동",
                 "Space: 스프린트 (스태미나 소모)",
@@ -105,15 +117,7 @@ public class MainMenu extends JFrame {
             label.setForeground(Color.WHITE);
             textPanel.add(label);
         }
-
-        howtoPanel.add(textPanel, BorderLayout.CENTER);
-
-        // 뒤로 버튼
-        JButton backBtn = createButton("메인 메뉴로", e -> cardLayout.show(container, "main"));
-        JPanel backPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
-        backPanel.setBackground(new Color(20, 20, 40));
-        backPanel.add(backBtn);
-        howtoPanel.add(backPanel, BorderLayout.SOUTH);
+        return textPanel;
     }
 
     private void initRecordsPanel() {

@@ -1,4 +1,3 @@
-// ItemType.java (수정본 - 새로운 효과 반영)
 package com.game;
 
 public enum ItemType {

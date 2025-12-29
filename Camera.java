@@ -1,6 +1,6 @@
-// Camera.java (전체 수정본 - JOptionPane 에러 완전 해결 + 몬스터 게임 오버 처리 이동)
 package com.game;
 
+import java.awt.Point;
 import java.util.List;
 
 public class Camera {
@@ -13,11 +13,16 @@ public class Camera {
 
     public double stamina = 100.0;
     public static final double MAX_STAMINA = 100.0;
-    private static final double STAMINA_DRAIN = 0.9;
+    private static final double STAMINA_DRAIN_BASE = 0.6;
+    private static final double STAMINA_DRAIN_MULTIPLIER = 1.5;
     private static final double STAMINA_RECOVER = 0.6;
 
+    private static final double SPRINT_BLOCK_THRESHOLD = 30.0;
+
+    private boolean sprintBlocked = false;
+
     public boolean escaped = false;
-    public boolean gameOver = false;  // 몬스터에 잡혔는지 플래그 추가
+    public boolean gameOver = false;
 
     public double flashlightBoost = 0.0;
     public double flashlightDuration = 0.0;
@@ -25,14 +30,6 @@ public class Camera {
     public double monsterFreezeTime = 0.0;
 
     private Monster monster;
-    // Camera.java (getter 추가 - monster 접근 허용)
-    // 필드
-
-
-    // getter 추가
-    public Monster getMonster() {
-        return monster;
-    }
 
     public Camera(double x, double y, double rot) {
         this.x = x;
@@ -48,14 +45,33 @@ public class Camera {
         this.monster = monster;
     }
 
-    public void update(Input in, int[][] map, double dt) {
+    public Monster getMonster() {
+        return monster;
+    }
+
+    public void update(Input in, int[][] map, double dt, List<Point> escapePath, boolean showPath) {
         boolean moving = in.forward || in.backward || in.left || in.right;
-        boolean sprint = in.sprint && stamina > 0 && moving;
 
-        double speed = sprint ? SPRINT_SPEED : WALK_SPEED;
+        boolean sprintRequested = in.sprint && moving;
+        boolean canSprint = sprintRequested && !sprintBlocked;
 
-        if (sprint) stamina = Math.max(0, stamina - STAMINA_DRAIN);
-        else stamina = Math.min(MAX_STAMINA, stamina + STAMINA_RECOVER);
+        double speed = canSprint ? SPRINT_SPEED : WALK_SPEED;
+
+        if (canSprint) {
+            double drainMultiplier = 1.0 + (1.0 - stamina / MAX_STAMINA) * STAMINA_DRAIN_MULTIPLIER;
+            double drain = STAMINA_DRAIN_BASE * drainMultiplier;
+            stamina = Math.max(0, stamina - drain);
+
+            if (stamina <= 0) {
+                sprintBlocked = true;
+            }
+        } else {
+            stamina = Math.min(MAX_STAMINA, stamina + STAMINA_RECOVER);
+
+            if (sprintBlocked && stamina >= SPRINT_BLOCK_THRESHOLD) {
+                sprintBlocked = false;
+            }
+        }
 
         double dx = Math.cos(rot);
         double dy = Math.sin(rot);
@@ -84,13 +100,12 @@ public class Camera {
             monsterFreezeTime -= dt;
         }
 
-        // 몬스터 업데이트
+        // 몬스터 업데이트: map 전달해서 실시간 경로 계산
         if (monster != null) {
-            monster.update(this, map, dt);
+            monster.update(map, this, dt);
 
-            // 몬스터 충돌 체크 (JOptionPane은 Game.java에서 처리)
-            if (!monster.frozen && monster.collidesWith(this)) {
-                gameOver = true;  // 플래그만 설정 (Game.java에서 메시지 표시)
+            if (!monster.frozen && monster.canGrab(this)) {
+                gameOver = true;
             }
         }
     }
